@@ -1,0 +1,158 @@
+http://localhost:8081/api/v1/swagger-ui/index.html#/
+docker compose up -d postgres redis
+
+mvn spring-boot:run -Dspring-boot.run.jvmArguments="-Deureka.client.register-with-eureka=false -Deureka.client.fetch-registry=false"
+
+
+Summary: You want to build the user-service — a Spring Boot microservice that handles auth (register, login, refresh, logout), user profile management, address CRUD, and JWT issuance — as the first business service in this e-commerce microservices project.
+
+Before I draft the full plan, a few quick questions:
+
+[1]: What is the project layout preference? a. Single Maven project for user-service — standalone pom.xml, lives as a top-level directory alongside future services, each self-contained b. Maven multi-module root — a parent pom.xml at the project root with user-service as the first child module (cleaner for sharing a common library later) c. Other — your preference
+
+[2]: For JWT, which approach do you prefer? a. HMAC (HS256) with a shared secret — simpler to set up, the secret from docker-compose (JWT_SECRET env var) is used by both user-service and gateway b. RSA (RS256) with a key pair — user-service signs with private key, gateway verifies with public key — more production-grade but more setup c. Other
+
+[3]: Should the outbox relay (publishing user.registered to Kafka) be included in this service? a. Yes — include the @Scheduled outbox poller that publishes to the user.registered topic b. No — skip Kafka for now, get auth/profile working first, add it as a follow-up c. Other
+
+
+
+1-> a
+2-> a
+3-> b
+
+
+
+Implementation Plan — User Service
+Problem Statement: Build the user-service as a standalone Spring Boot 3 / Maven microservice that handles JWT-based authentication, user profile management, and address CRUD. It is the first business service in the e-commerce platform and the source of JWTs consumed by every other service.
+
+Requirements:
+
+Standalone Maven project at Ecomm POC/user-service/
+JWT via HS256 using JWT_SECRET env var (shared with gateway)
+Access token: 15 min TTL, Refresh token: 7 day TTL
+Refresh tokens stored hashed in PostgreSQL refresh_tokens table; blacklisted JTIs on logout stored in Redis
+Redis cache for user profiles (user:{id}, TTL 15 min)
+No Kafka / outbox in this iteration
+Standard error envelope {timestamp, status, error, message, path, traceId} on all errors
+DTOs always separate from JPA entities (MapStruct)
+Internal Feign endpoint GET /users/{userId} (called by Order Service later)
+Registers with Eureka on startup
+Runs inside ecommerce-net Docker network per the existing docker-compose.yml
+
+
+
+Task Breakdown:
+
+Task 1: Project scaffold & dependencies
+
+Create user-service/ directory with a pom.xml declaring: spring-boot-starter-web, spring-boot-starter-security, spring-boot-starter-data-jpa, spring-boot-starter-data-redis, spring-boot-starter-validation, spring-boot-starter-actuator, spring-cloud-starter-netflix-eureka-client, jjwt-api + jjwt-impl + jjwt-jackson (0.12.x), mapstruct, lombok, postgresql, springdoc-openapi-starter-webmvc-ui
+Add UserServiceApplication.java with @SpringBootApplication
+Add application.yml wiring up datasource (pointing to user_db), Redis, Eureka, and a jwt.secret / jwt.access-token-expiry / jwt.refresh-token-expiry config block
+Add Dockerfile (multi-stage: Maven build → JRE 17 runtime image)
+Test: mvn compile passes cleanly; application starts and registers with Eureka (manual smoke test with docker-compose infra up)
+Demo: mvn compile succeeds with zero errors; Spring Boot banner appears on startup
+Task 2: JPA entities & repositories
+
+Create the four entities mapped to user_db tables: User, Role, Address, RefreshToken — annotations matching the SQL schema (@Table, @Column, UUID PKs via @GeneratedValue(strategy = UUID), @ManyToMany for user_roles, @OneToMany for addresses and refresh tokens)
+Create repositories: UserRepository (findByEmail), RoleRepository (findByName), AddressRepository (findByUserIdOrderByIsDefaultDesc), RefreshTokenRepository (findByTokenHash, deleteByUserId)
+Test: @DataJpaTest + Testcontainers Postgres — verify UserRepository.findByEmail, unique email constraint, AddressRepository.findByUserId, RefreshTokenRepository.findByTokenHash
+Demo: Repository tests pass; a User with a Role and an Address can be saved and retrieved correctly
+Task 3: DTOs, mappers, and exception infrastructure
+
+Create all request DTOs with Bean Validation: RegisterRequest (@Email, @NotBlank, @Size(min=8) on password), LoginRequest, RefreshRequest, UpdateUserRequest, AddressRequest
+Create all response DTOs: UserResponse, TokenResponse, AddressResponse, ErrorResponse
+Implement UserMapper and AddressMapper with MapStruct (@Mapper(componentModel = "spring"))
+Create the exception hierarchy: AppException(HttpStatus, String) → ResourceNotFoundException, ConflictException, UnauthorizedException
+Implement GlobalExceptionHandler (@RestControllerAdvice) handling AppException, MethodArgumentNotValidException, and generic Exception → always emits the standard ErrorResponse JSON shape including traceId from MDC
+Test: Unit-test mappers (entity → DTO round-trip); unit-test GlobalExceptionHandler for each exception type
+Demo: Mapping tests pass; throwing a ResourceNotFoundException from a controller produces the correct error JSON
+Task 4: JWT service
+
+Implement JwtService encapsulating all token logic:
+generateAccessToken(User) — builds a JWT with claims sub=userId, roles, jti=uuid, exp=now+15m, signed with HS256 using the configured secret
+generateRefreshToken() — returns a cryptographically random opaque string (UUID or SecureRandom)
+validateAccessToken(String) → parsed Claims or throws UnauthorizedException
+extractUserId(Claims), extractJti(Claims), extractRoles(Claims)
+Implement RedisConfig and JwtFilter (extends OncePerRequestFilter): reads Authorization: Bearer, validates the token, checks the Redis blacklist (blacklist:{jti}), builds a UsernamePasswordAuthenticationToken from X-User-Id / X-User-Roles (for future gateway-forwarded requests) or directly from the validated JWT
+Test: Unit-test JwtService: generate → validate round-trip, expired token throws, tampered token throws
+Demo: JwtService tests pass; a generated access token can be decoded and round-trips correctly
+Task 5: Auth endpoints — register & login
+
+Implement AuthService.register(): check email uniqueness (throw ConflictException if duplicate), hash password with BCrypt, persist User + assign ROLE_USER, generate access + refresh tokens, persist hashed refresh token in refresh_tokens table, return TokenResponse
+Implement AuthService.login(): load user by email, verify BCrypt password (throw UnauthorizedException on mismatch), generate new token pair, persist refresh token, return TokenResponse
+Implement AuthController with POST /auth/register (201) and POST /auth/login (200), both marked public in SecurityConfig (permit all on /auth/**)
+Configure SecurityConfig: stateless sessions, disable CSRF, permit /auth/** and /actuator/**, require authentication everywhere else
+Test: @SpringBootTest + Testcontainers Postgres + Redis — full HTTP flow: register → 201 with valid JWT; duplicate register → 409; login with wrong password → 401
+Demo: curl POST /auth/register returns a 201 with accessToken and refreshToken; decoding the JWT shows correct sub and roles
+Task 6: Auth endpoints — refresh & logout
+
+Implement AuthService.refresh(): look up non-revoked RefreshToken by hash (throw UnauthorizedException if not found/expired/revoked), load user, issue new token pair, rotate refresh token (revoke old row, insert new), return TokenResponse
+Implement AuthService.logout(): extract jti from the current access token, write blacklist:{jti} to Redis with TTL = remaining token life, revoke the RefreshToken row for this user
+Add POST /auth/refresh (200, public) and POST /auth/logout (204, requires User auth) to AuthController
+Test: Integration tests — refresh happy path; refresh with revoked token → 401; logout then use old access token → 401 (Redis blacklist hit)
+Demo: Full auth lifecycle works end-to-end: register → login → refresh → logout → old token rejected
+Task 7: User profile & address endpoints
+
+Implement UserService: getMe(userId) with Redis cache-aside (user:{id}, TTL 15 min), updateMe(userId, request) (update name/phone, evict cache), getAddresses(userId), addAddress(userId, request) (enforce single default: if isDefault=true, clear existing defaults first), updateAddress(userId, addressId, request), deleteAddress(userId, addressId)
+Implement UserController with all endpoints from the API contract: GET /users/me, PUT /users/me, GET /users/me/addresses, POST /users/me/addresses, PUT /users/me/addresses/{id}, DELETE /users/me/addresses/{id}
+Add the internal GET /users/{userId} endpoint (no auth filter needed if called by Feign within the Docker network — permit in SecurityConfig or protect with a header check)
+Extract userId from the Authentication object (set by JwtFilter)
+Test: Integration tests for each endpoint — GET /users/me returns profile; PUT /users/me updates and evicts cache; address add/update/delete lifecycle; GET /users/{userId} returns correct profile
+Demo: Full user and address CRUD works; Redis profile cache verified by hitting GET /users/me twice and confirming the second call is served from cache (DB query count = 1)
+Task 8: OpenAPI docs & Docker wiring
+
+Ensure springdoc-openapi is configured: springdoc.api-docs.path=/v3/api-docs, all controller methods have @Operation and @ApiResponse annotations
+Verify the Dockerfile builds a runnable image and the user-service block in docker-compose.yml starts the service correctly against the existing infra
+Smoke-test the full docker-compose stack: postgres + redis + kafka + eureka + user-service all healthy
+Test: docker compose up user-service → service registers in Eureka dashboard (http://localhost:8761); GET /v3/api-docs returns the OpenAPI spec; all previous integration tests still pass
+Demo: Eureka dashboard shows USER-SERVICE as UP; Swagger UI at http://localhost:8080/swagger-ui.html (via gateway) lists all user-service endpoints
+
+
+
+
+user-service/
+├── pom.xml
+├── Dockerfile
+└── src/
+    ├── main/
+    │   ├── java/com/ecomm/user/
+    │   │   ├── UserServiceApplication.java
+    │   │   ├── config/
+    │   │   │   ├── SecurityConfig.java
+    │   │   │   ├── RedisConfig.java
+    │   │   │   └── JwtFilter.java
+    │   │   ├── controller/
+    │   │   │   ├── AuthController.java
+    │   │   │   └── UserController.java
+    │   │   ├── service/
+    │   │   │   ├── AuthService.java
+    │   │   │   ├── UserService.java
+    │   │   │   └── JwtService.java
+    │   │   ├── repository/
+    │   │   │   ├── UserRepository.java
+    │   │   │   ├── RoleRepository.java
+    │   │   │   ├── AddressRepository.java
+    │   │   │   └── RefreshTokenRepository.java
+    │   │   ├── entity/
+    │   │   │   ├── User.java
+    │   │   │   ├── Role.java
+    │   │   │   ├── Address.java
+    │   │   │   └── RefreshToken.java
+    │   │   ├── dto/
+    │   │   │   ├── request/  (RegisterRequest, LoginRequest, RefreshRequest, UpdateUserRequest, AddressRequest)
+    │   │   │   └── response/ (UserResponse, TokenResponse, AddressResponse, ErrorResponse)
+    │   │   ├── mapper/
+    │   │   │   ├── UserMapper.java
+    │   │   │   └── AddressMapper.java
+    │   │   └── exception/
+    │   │       ├── AppException.java
+    │   │       ├── ResourceNotFoundException.java
+    │   │       ├── ConflictException.java
+    │   │       ├── UnauthorizedException.java
+    │   │       └── GlobalExceptionHandler.java
+    │   └── resources/
+    │       └── application.yml
+    └── test/
+        └── java/com/ecomm/user/
+            ├── service/  (AuthServiceTest, UserServiceTest, JwtServiceTest)
+            └── controller/ (AuthControllerTest, UserControllerTest)
