@@ -1,0 +1,172 @@
+spring:
+  application:
+    name: api-gateway
+
+  # Exclude the auto-config that generates a random in-memory user/password —
+  # the gateway is stateless JWT-only, so no UserDetailsService is needed.
+  # This suppresses the "Using generated security password" startup warning.
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.security.reactive.ReactiveUserDetailsServiceAutoConfiguration
+
+  # ── Redis (JWT blacklist) ────────────────────────────────────────────
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: 6379
+
+  # ── Spring Cloud Gateway routes ─────────────────────────────────────
+  cloud:
+    gateway:
+      # Integrate with Eureka so lb:// URIs resolve via service registry
+      discovery:
+        locator:
+          enabled: false          # manual route definitions only; no auto-routes
+      routes:
+
+        # ── User Service: auth (public) ──────────────────────────────
+        - id: user-service-auth
+          uri: lb://user-service
+          predicates:
+            - Path=/api/v1/auth/**
+          filters:
+            - CircuitBreaker=name=userServiceCB,fallbackUri=forward:/fallback
+
+        # ── User Service: users (authenticated) ─────────────────────
+        - id: user-service-users
+          uri: lb://user-service
+          predicates:
+            - Path=/api/v1/users/**
+          filters:
+            - CircuitBreaker=name=userServiceCB,fallbackUri=forward:/fallback
+
+        # ── Product Service: products ────────────────────────────────
+        - id: product-service-products
+          uri: lb://product-service
+          predicates:
+            - Path=/api/v1/products/**
+          filters:
+            - CircuitBreaker=name=productServiceCB,fallbackUri=forward:/fallback
+
+        # ── Product Service: categories ──────────────────────────────
+        - id: product-service-categories
+          uri: lb://product-service
+          predicates:
+            - Path=/api/v1/categories/**
+          filters:
+            - CircuitBreaker=name=productServiceCB,fallbackUri=forward:/fallback
+
+        # ── Inventory Service ────────────────────────────────────────
+        - id: inventory-service
+          uri: lb://inventory-service
+          predicates:
+            - Path=/api/v1/inventory/**
+          filters:
+            - CircuitBreaker=name=inventoryServiceCB,fallbackUri=forward:/fallback
+
+        # ── Cart Service ─────────────────────────────────────────────
+        - id: cart-service
+          uri: lb://cart-service
+          predicates:
+            - Path=/api/v1/cart/**
+          filters:
+            - CircuitBreaker=name=cartServiceCB,fallbackUri=forward:/fallback
+
+        # ── Order Service ────────────────────────────────────────────
+        - id: order-service
+          uri: lb://order-service
+          predicates:
+            - Path=/api/v1/orders/**
+          filters:
+            - CircuitBreaker=name=orderServiceCB,fallbackUri=forward:/fallback
+
+        # ── Shipment Service ─────────────────────────────────────────
+        - id: shipment-service
+          uri: lb://shipment-service
+          predicates:
+            - Path=/api/v1/shipments/**
+          filters:
+            - CircuitBreaker=name=shipmentServiceCB,fallbackUri=forward:/fallback
+
+# ── Eureka Client ────────────────────────────────────────────────────
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE:http://localhost:8761/eureka}
+    fetch-registry: true
+    register-with-eureka: true
+  instance:
+    prefer-ip-address: true
+
+# ── JWT ──────────────────────────────────────────────────────────────
+jwt:
+  secret: ${JWT_SECRET:change-me-dev-secret-must-be-at-least-32-chars}
+
+# ── Resilience4j Circuit Breakers ────────────────────────────────────
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        # Open the circuit after 50% failure rate over a 10-call sliding window
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        # Stay open for 10s before trying a single call (HALF_OPEN)
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        # Slow calls (>2s) also count as failures
+        slow-call-duration-threshold: 2s
+        slow-call-rate-threshold: 50
+    instances:
+      userServiceCB:
+        base-config: default
+      productServiceCB:
+        base-config: default
+      inventoryServiceCB:
+        base-config: default
+      cartServiceCB:
+        base-config: default
+      orderServiceCB:
+        base-config: default
+      shipmentServiceCB:
+        base-config: default
+
+  timelimiter:
+    configs:
+      default:
+        # Abort calls that take longer than 2s — consistent with the design doc
+        timeout-duration: 2s
+        cancel-running-future: true
+    instances:
+      userServiceCB:
+        base-config: default
+      productServiceCB:
+        base-config: default
+      inventoryServiceCB:
+        base-config: default
+      cartServiceCB:
+        base-config: default
+      orderServiceCB:
+        base-config: default
+      shipmentServiceCB:
+        base-config: default
+
+# ── Server ───────────────────────────────────────────────────────────
+server:
+  port: 8080
+
+# ── Actuator ─────────────────────────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,circuitbreakers
+  endpoint:
+    health:
+      show-details: always
+
+# ── Logging ──────────────────────────────────────────────────────────
+logging:
+  level:
+    org.springframework.cloud.gateway: INFO
+    io.github.resilience4j: INFO
