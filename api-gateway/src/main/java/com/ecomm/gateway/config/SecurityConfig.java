@@ -2,7 +2,6 @@ package com.ecomm.gateway.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
@@ -33,17 +32,12 @@ public class SecurityConfig {
                 .formLogin(ServerHttpSecurity.FormLoginSpec::disable)
                 .httpBasic(ServerHttpSecurity.HttpBasicSpec::disable)
                 .authorizeExchange(exchanges -> exchanges
-                        // Public: auth endpoints
-                        .pathMatchers("/api/v1/auth/**").permitAll()
-                        // Public: product browsing & category listing (GET only)
-                        .pathMatchers(HttpMethod.GET,
-                                "/api/v1/products/**", "/api/v1/categories/**").permitAll()
-                        // Public: shipment tracking (no auth needed)
-                        .pathMatchers("/api/v1/shipments/track/**").permitAll()
-                        // Internal: actuator & fallback
-                        .pathMatchers("/actuator/**", "/fallback").permitAll()
-                        // Everything else must be authenticated
-                        .anyExchange().authenticated()
+                        // All auth/access enforcement is handled by JwtAuthenticationFilter
+                        // (a Spring Cloud Gateway GlobalFilter). Spring Security's reactive
+                        // context is never populated by that filter, so .authenticated() here
+                        // would block every request. We permit all at this layer and rely on
+                        // JwtAuthenticationFilter as the single source of auth truth.
+                        .anyExchange().permitAll()
                 )
                 // Delegate 401 responses to our JwtAuthenticationFilter so the
                 // response uses the project's standard error envelope.
