@@ -1,3 +1,12 @@
+1. All backend service implementation ->> done 
+2. 1 success order test end to end 
+3. using swagger json front end implementation in react js 
+4 . end to end testing using front end 
+5 . understanding of end to end feature component 
+6 . implement kubernates for service scaling 
+7 . implement monitoring tools like Grafana and micrometer + Jaegar /Zipkin 
+8 and if all things are working best condition then we will buy free hosting for our website for public use
+
 Let me check the user-service port and context path to give you accurate answers.
 
 
