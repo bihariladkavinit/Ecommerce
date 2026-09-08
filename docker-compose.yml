@@ -193,6 +193,8 @@ services:
   payment-service:
     build: ./payment-service
     container_name: payment-service
+    ports:
+      - "8086:8086"
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/payment_db
       SPRING_DATASOURCE_USERNAME: postgres
