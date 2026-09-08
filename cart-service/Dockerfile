@@ -1,30 +1,27 @@
 # ── Stage 1: build ────────────────────────────────────────────────────
-FROM maven:3.9.6-eclipse-temurin-21 AS builder
+FROM eclipse-temurin:21-jdk-alpine AS builder
 
-WORKDIR /build
+WORKDIR /app
 
-# Cache dependency layer separately from source
+# Copy Maven wrapper and pom first for layer caching
 COPY pom.xml .
-RUN mvn dependency:go-offline -q
-
 COPY src ./src
-RUN mvn package -DskipTests -q
+
+# Build without tests (tests run in CI, not during image build)
+RUN apk add --no-cache maven && mvn clean package -DskipTests
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────
 FROM eclipse-temurin:21-jre-alpine
 
 WORKDIR /app
 
+# Copy only the fat JAR from the build stage
+COPY --from=builder /app/target/cart-service-0.0.1-SNAPSHOT.jar app.jar
+
 # Non-root user for security
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 USER appuser
 
-COPY --from=builder /build/target/user-service-*.jar app.jar
+EXPOSE 8084
 
-EXPOSE 8081
-
-ENTRYPOINT ["java", \
-  "-XX:+UseContainerSupport", \
-  "-XX:MaxRAMPercentage=75.0", \
-  "-Djava.security.egd=file:/dev/./urandom", \
-  "-jar", "app.jar"]
+ENTRYPOINT ["java", "-jar", "app.jar"]

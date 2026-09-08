@@ -161,17 +161,19 @@ CREATE INDEX idx_outbox_unpublished ON outbox_event(published, created_at) WHERE
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 CREATE TABLE orders (
-    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id          UUID NOT NULL,
-    status           VARCHAR(30) NOT NULL,           -- PENDING, CONFIRMED, CANCELLED
-    saga_state       VARCHAR(30) NOT NULL,           -- CREATED, INVENTORY_RESERVED, PAYMENT_COMPLETED,
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id               UUID NOT NULL,
+    status                VARCHAR(30) NOT NULL,       -- PENDING, CONFIRMED, CANCELLED
+    saga_state            VARCHAR(30) NOT NULL,       -- CREATED, INVENTORY_RESERVED, PAYMENT_COMPLETED,
                                                        -- INVENTORY_CONFIRMED, SHIPMENT_CREATED, CONFIRMED,
                                                        -- COMPENSATING, CANCELLED
-    total_amount     NUMERIC(12,2) NOT NULL,
-    shipping_address JSONB,                          -- snapshot at order time
-    idempotency_key  VARCHAR(100) UNIQUE,
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+    total_amount          NUMERIC(12,2) NOT NULL,
+    shipping_address      JSONB,                      -- snapshot at order time
+    idempotency_key       VARCHAR(100) UNIQUE,
+    payment_id            UUID,                       -- set when payment.charge.reply SUCCEEDED
+    compensations_pending INT NOT NULL DEFAULT 0,     -- tracks in-flight compensation commands (0,1,2)
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE order_items (

@@ -1,0 +1,125 @@
+server:
+  port: 8084
+  servlet:
+    context-path: /api/v1
+
+spring:
+  application:
+    name: cart-service
+
+  # ── Redis (primary cart store) ────────────────────────────────────────
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: 6379
+
+  # ── Jackson ───────────────────────────────────────────────────────────
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+  # ── Feign + Circuit Breaker ────────────────────────────────────────── 
+  cloud:
+    openfeign:
+      circuitbreaker:
+        enabled: true
+        # Use alphanumeric IDs so CB instance names match application.yml keys
+        # e.g. "productService" rather than "ProductClient#getProduct(UUID)"
+        alphanumeric-ids:
+          enabled: false
+
+# ── Eureka ────────────────────────────────────────────────────────────
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE:http://localhost:8761/eureka}
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+    instance-id: ${spring.application.name}:${server.port}
+
+# ── Resilience4j ──────────────────────────────────────────────────────
+resilience4j:
+
+  circuitbreaker:
+    instances:
+      product-service:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        register-health-indicator: true
+      inventory-service:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        register-health-indicator: true
+      order-service:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 15s
+        permitted-number-of-calls-in-half-open-state: 3
+        register-health-indicator: true
+
+  timelimiter:
+    instances:
+      product-service:
+        timeout-duration: 2s
+      inventory-service:
+        timeout-duration: 2s
+      order-service:
+        timeout-duration: 3s
+
+  retry:
+    instances:
+      product-service:
+        max-attempts: 2
+        wait-duration: 500ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+      inventory-service:
+        max-attempts: 2
+        wait-duration: 500ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+      order-service:
+        max-attempts: 1
+
+  bulkhead:
+    instances:
+      inventory-service:
+        max-concurrent-calls: 10
+        max-wait-duration: 0s
+
+# ── Cart configuration ────────────────────────────────────────────────
+cart:
+  ttl-days: 7
+
+# ── Actuator ──────────────────────────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,circuitbreakers
+  endpoint:
+    health:
+      show-details: always
+
+# ── OpenAPI ───────────────────────────────────────────────────────────
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+  show-actuator: false
+
+# ── Logging ───────────────────────────────────────────────────────────
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} traceId=%X{traceId} - %msg%n"
+  level:
+    com.ecomm: DEBUG
+    org.springframework.security: INFO
+    io.github.resilience4j: INFO
