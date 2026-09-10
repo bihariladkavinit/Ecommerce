@@ -19,7 +19,7 @@ USER appuser
 
 COPY --from=builder /build/target/shipment-service-*.jar app.jar
 
-EXPOSE 8085
+EXPOSE 8087
 
 ENTRYPOINT ["java", \
   "-XX:+UseContainerSupport", \

@@ -115,6 +115,8 @@ services:
   user-service:
     build: ./user-service
     container_name: user-service
+    ports:
+      - "8081:8081"
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/user_db
       SPRING_DATASOURCE_USERNAME: postgres
@@ -132,6 +134,8 @@ services:
   product-service:
     build: ./product-service
     container_name: product-service
+    ports:
+      - "8082:8082"
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/product_db
       SPRING_DATASOURCE_USERNAME: postgres
@@ -148,6 +152,8 @@ services:
   inventory-service:
     build: ./inventory-service
     container_name: inventory-service
+    ports:
+      - "8083:8083"
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/inventory_db
       SPRING_DATASOURCE_USERNAME: postgres
@@ -210,6 +216,8 @@ services:
   shipment-service:
     build: ./shipment-service
     container_name: shipment-service
+    ports:
+      - "8087:8087"
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/shipment_db
       SPRING_DATASOURCE_USERNAME: postgres
@@ -225,6 +233,8 @@ services:
   notification-service:
     build: ./notification-service
     container_name: notification-service
+    ports:
+      - "8088:8088"
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/notification_db
       SPRING_DATASOURCE_USERNAME: postgres

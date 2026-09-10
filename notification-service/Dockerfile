@@ -19,7 +19,7 @@ USER appuser
 
 COPY --from=builder /build/target/notification-service-*.jar app.jar
 
-EXPOSE 8086
+EXPOSE 8088
 
 ENTRYPOINT ["java", \
   "-XX:+UseContainerSupport", \

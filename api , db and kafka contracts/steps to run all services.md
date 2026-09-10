@@ -92,3 +92,152 @@ curl -X POST http://localhost:8080/api/v1/auth/login \
     "password": "SecurePass123!"
   }'
 Returns a TokenResponse with the accessToken you'd pass as Authorization: Bearer <token> on all subsequent authenticated calls.
+
+
+
+Step 1 — Register a user
+bash
+
+curl -s -X POST http://localhost:8080/api/v1/auth/register \
+-H "Content-Type: application/json" \
+-d '{
+"email": "test@example.com",
+"password": "password123",
+"firstName": "Test",
+"lastName": "User"
+}' | jq .
+Step 2 — Login (get JWT)
+bash
+
+curl -s -X POST http://localhost:8080/api/v1/auth/login \
+-H "Content-Type: application/json" \
+-d '{
+"email": "test@example.com",
+"password": "password123"
+}' | jq .
+Save the accessToken from the response:
+
+bash
+
+TOKEN="<accessToken from response>"
+Step 3 — Add a shipping address
+bash
+
+curl -s -X POST http://localhost:8080/api/v1/users/me/addresses \
+-H "Authorization: Bearer $TOKEN" \
+-H "Content-Type: application/json" \
+-d '{
+"line1": "123 Main Street",
+"city": "San Francisco",
+"state": "CA",
+"zip": "94105",
+"country": "US",
+"isDefault": true
+}' | jq .
+Save the address id:
+
+bash
+
+ADDRESS_ID="<id from response>"
+Step 4 — Create a product (Admin)
+First get an admin token (register with admin role or use a seeded admin). Assuming you have one:
+
+bash
+
+ADMIN_TOKEN="<admin accessToken>"
+
+curl -s -X POST http://localhost:8080/api/v1/products \
+-H "Authorization: Bearer $ADMIN_TOKEN" \
+-H "Content-Type: application/json" \
+-d '{
+"name": "Wireless Headphones",
+"description": "Premium noise-cancelling headphones",
+"price": 49.99,
+"imageUrl": "https://example.com/headphones.jpg"
+}' | jq .
+Save the product id:
+
+bash
+
+PRODUCT_ID="<id from response>"
+Step 5 — Seed inventory for the product (Admin)
+bash
+
+curl -s -X PUT http://localhost:8080/api/v1/inventory/$PRODUCT_ID \
+-H "Authorization: Bearer $ADMIN_TOKEN" \
+-H "Content-Type: application/json" \
+-d '{"quantity": 100}' | jq .
+Step 6 — Check inventory availability (optional sanity check)
+bash
+
+curl -s "http://localhost:8080/api/v1/inventory/$PRODUCT_ID/availability?qty=2" \
+-H "Authorization: Bearer $TOKEN" | jq .
+Expected: { "productId": "...", "available": true }
+
+Step 7 — Add item to cart
+bash
+
+curl -s -X POST http://localhost:8080/api/v1/cart/items \
+-H "Authorization: Bearer $TOKEN" \
+-H "Content-Type: application/json" \
+-d "{
+\"productId\": \"$PRODUCT_ID\",
+\"qty\": 2
+}" | jq .
+Step 8 — View cart (verify enrichment)
+bash
+
+curl -s http://localhost:8080/api/v1/cart \
+-H "Authorization: Bearer $TOKEN" | jq .
+Expected: cart with name, price, subtotal, and total populated.
+
+Step 9 — Checkout (triggers the full saga)
+bash
+
+curl -s -X POST http://localhost:8080/api/v1/cart/checkout \
+-H "Authorization: Bearer $TOKEN" \
+-H "Content-Type: application/json" \
+-H "Idempotency-Key: checkout-attempt-001" \
+-d "{
+\"shippingAddressId\": \"$ADDRESS_ID\"
+}" | jq .
+This returns an OrderResponse with status: PENDING and sagaState: CREATED. Save the order id:
+
+bash
+
+ORDER_ID="<id from response>"
+Step 10 — Poll order status (watch the saga progress)
+Run this a few times to watch the saga advance:
+
+bash
+
+curl -s http://localhost:8080/api/v1/orders/$ORDER_ID/status \
+-H "Authorization: Bearer $TOKEN" | jq .
+The sagaState will advance through:
+
+
+CREATED → INVENTORY_RESERVED → PAYMENT_COMPLETED
+→ INVENTORY_CONFIRMED → SHIPMENT_CREATED → CONFIRMED
+Step 11 — Get full order details
+bash
+
+curl -s http://localhost:8080/api/v1/orders/$ORDER_ID \
+-H "Authorization: Bearer $TOKEN" | jq .
+Step 12 — Verify cart is cleared
+bash
+
+curl -s http://localhost:8080/api/v1/cart \
+-H "Authorization: Bearer $TOKEN" | jq .
+Expected: { "items": [], "total": 0 }
+
+Notes
+Services that must be running before you start:
+
+
+eureka-server, api-gateway, user-service, product-service,
+inventory-service, cart-service, order-service, payment-service
+The saga is fully async — after checkout, give it 2–5 seconds for all Kafka hops (outbox relay polls every 500ms, each saga step is one round-trip). Step 10 is your window into that progress.
+
+To test a failure path — set payment.gateway.mock.failure-rate: 1.0 in payment-service application.yml before starting it. The saga will fail at the payment step, release the inventory reservation, and the order will land on CANCELLED.
+
+Idempotency test — run Step 9 again with the same Idempotency-Key: checkout-attempt-001. You'll get the same order back without creating a duplicate.
