@@ -191,7 +191,7 @@ public class ProductService {
                     "name",        product.getName(),
                     "price",       product.getPrice(),
                     "categoryId",  product.getCategoryId() != null
-                                       ? product.getCategoryId().toString() : null
+                                       ? product.getCategoryId().toString() : ""
             ));
         } catch (JsonProcessingException ex) {
             log.error("Failed to serialise product.created payload", ex);

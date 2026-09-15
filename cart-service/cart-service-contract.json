@@ -1,0 +1,443 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Cart Service API",
+    "description": "Shopping cart management — Redis-backed active cart, product enrichment via Feign, checkout to order-service.",
+    "contact": {
+      "name": "Ecomm Platform Team"
+    },
+    "version": "v1"
+  },
+  "servers": [
+    {
+      "url": "/api/v1",
+      "description": "Default (context path)"
+    }
+  ],
+  "security": [
+    {
+      "GatewayAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Cart",
+      "description": "Shopping cart management and checkout"
+    }
+  ],
+  "paths": {
+    "/cart/items/{productId}": {
+      "put": {
+        "tags": [
+          "Cart"
+        ],
+        "summary": "Update item quantity",
+        "description": "Sets the quantity of an existing cart item. Sending qty=0 removes the item.",
+        "operationId": "updateItem",
+        "parameters": [
+          {
+            "name": "productId",
+            "in": "path",
+            "description": "UUID of the product to update",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateItemRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Item updated, updated cart returned",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid authentication",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Product not in cart",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Cart"
+        ],
+        "summary": "Remove item from cart",
+        "description": "Removes a single product from the cart. Idempotent — no error if the product is not present.",
+        "operationId": "removeItem",
+        "parameters": [
+          {
+            "name": "productId",
+            "in": "path",
+            "description": "UUID of the product to remove",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Missing or invalid authentication",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Item removed, updated cart returned",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/cart/items": {
+      "post": {
+        "tags": [
+          "Cart"
+        ],
+        "summary": "Add item to cart",
+        "description": "Adds a product to the cart. If the product is already present its quantity is merged.",
+        "operationId": "addItem",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddItemRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "401": {
+            "description": "Missing or invalid authentication",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Product not found or temporarily unavailable",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Item added, updated cart returned",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or inactive product",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/cart/checkout": {
+      "post": {
+        "tags": [
+          "Cart"
+        ],
+        "summary": "Checkout",
+        "description": "Validates cart items against product-service (price snapshot) and inventory-service (availability), then creates an order via order-service. The cart is cleared on success. Requires the 'Idempotency-Key' header to prevent duplicate orders on retry.\n",
+        "operationId": "checkout",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Client-supplied deduplication key. Use the same key on retries to avoid creating duplicate orders.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "a1b2c3d4-checkout-attempt-1"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckoutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Order created, cart cleared",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Cart is empty or request invalid",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid authentication",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "One or more items unavailable, or order-service unavailable",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/cart": {
+      "get": {
+        "tags": [
+          "Cart"
+        ],
+        "summary": "Get cart",
+        "description": "Returns the authenticated user's cart enriched with live product name and price.",
+        "operationId": "getCart",
+        "responses": {
+          "401": {
+            "description": "Missing or invalid authentication",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Cart retrieved (may be empty)",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Cart"
+        ],
+        "summary": "Clear cart",
+        "description": "Removes all items from the cart. Idempotent — safe to call on an already-empty cart.",
+        "operationId": "clearCart",
+        "responses": {
+          "204": {
+            "description": "Cart cleared"
+          },
+          "401": {
+            "description": "Missing or invalid authentication"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "UpdateItemRequest": {
+        "type": "object",
+        "properties": {
+          "qty": {
+            "minimum": 0,
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "CartItemResponse": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "price": {
+            "type": "number"
+          },
+          "qty": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "subtotal": {
+            "type": "number"
+          }
+        }
+      },
+      "CartResponse": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CartItemResponse"
+            }
+          },
+          "total": {
+            "type": "number"
+          }
+        }
+      },
+      "AddItemRequest": {
+        "required": [
+          "productId"
+        ],
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "qty": {
+            "minimum": 1,
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "CheckoutRequest": {
+        "required": [
+          "shippingAddressId"
+        ],
+        "type": "object",
+        "properties": {
+          "shippingAddressId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "OrderResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          },
+          "sagaState": {
+            "type": "string"
+          },
+          "totalAmount": {
+            "type": "number"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "GatewayAuth": {
+        "type": "apiKey",
+        "description": "Trusted user identity header forwarded by the API Gateway after JWT validation. Supply a valid user UUID for direct testing.",
+        "name": "X-User-Id",
+        "in": "header"
+      }
+    }
+  }
+}

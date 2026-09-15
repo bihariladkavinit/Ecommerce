@@ -124,7 +124,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
 
                     // 5. Mutate request: remove Authorization, add trusted internal headers
                     ServerHttpRequest mutatedRequest = request.mutate()
-                            .header(HttpHeaders.AUTHORIZATION)   // strips the header
+                            .headers(httpHeaders -> httpHeaders.remove(HttpHeaders.AUTHORIZATION))
                             .header("X-User-Id", userId)
                             .header("X-User-Roles", roles)
                             .build();

@@ -135,7 +135,7 @@ resilience4j:
     configs:
       default:
         # Abort calls that take longer than 2s — consistent with the design doc
-        timeout-duration: 2s
+        timeout-duration: 10s
         cancel-running-future: true
     instances:
       userServiceCB:

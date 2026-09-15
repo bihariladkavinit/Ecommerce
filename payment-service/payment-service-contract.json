@@ -1,0 +1,122 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Payment Service API",
+    "description": "Internal payment processing — Kafka-driven charge/refund via mock PSP gateway.",
+    "contact": {
+      "name": "Ecomm Platform Team"
+    },
+    "version": "v1"
+  },
+  "servers": [
+    {
+      "url": "/api/v1",
+      "description": "Default (context path)"
+    }
+  ],
+  "security": [
+    {
+      "GatewayAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Payments",
+      "description": "Internal admin endpoint for payment lookup (not Gateway-routed)"
+    }
+  ],
+  "paths": {
+    "/payments/{orderId}": {
+      "get": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "Get payment by order ID",
+        "description": "Returns payment details for a given order. Requires ROLE_ADMIN. All charge/refund operations are Kafka-driven — this endpoint is read-only.",
+        "operationId": "getPayment",
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "description": "UUID of the order",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "404": {
+            "description": "No payment exists for this orderId",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Payment found",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ROLE_ADMIN required",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "PaymentResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "amount": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string"
+          },
+          "gatewayRef": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "GatewayAuth": {
+        "type": "apiKey",
+        "description": "Trusted user identity header forwarded by the API Gateway. ROLE_ADMIN required for all payment endpoints.",
+        "name": "X-User-Id",
+        "in": "header"
+      }
+    }
+  }
+}

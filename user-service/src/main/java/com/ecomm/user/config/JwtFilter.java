@@ -59,7 +59,33 @@ public class JwtFilter extends OncePerRequestFilter {
 
         String token = extractToken(request);
 
-        if (token != null) {
+        // If no Bearer token, check for X-User-Id header (set by API Gateway after JWT validation)
+        if (token == null) {
+            String userId = request.getHeader("X-User-Id");
+            String roles = request.getHeader("X-User-Roles");
+            if (userId != null) {
+                try {
+                    UUID userUUID = UUID.fromString(userId);
+                    Set<String> roleSet = roles != null ? Set.of(roles.split(",")) : Set.of();
+                    
+                    List<SimpleGrantedAuthority> authorities = roleSet.stream()
+                            .map(SimpleGrantedAuthority::new)
+                            .collect(Collectors.toList());
+                    
+                    UsernamePasswordAuthenticationToken auth =
+                            new UsernamePasswordAuthenticationToken(userUUID, null, authorities);
+                    auth.setDetails(request);
+                    
+                    SecurityContextHolder.getContext().setAuthentication(auth);
+                    
+                    // ── MDC tracing ───────────────────────────────────────
+                    MDC.put("userId", userId);
+                    
+                } catch (IllegalArgumentException ex) {
+                    log.debug("Invalid X-User-Id header format: {}", userId);
+                }
+            }
+        } else if (token != null) {
             try {
                 Claims claims = jwtService.validateAndExtractClaims(token);
 

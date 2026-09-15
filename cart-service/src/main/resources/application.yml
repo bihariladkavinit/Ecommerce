@@ -66,11 +66,11 @@ resilience4j:
   timelimiter:
     instances:
       product-service:
-        timeout-duration: 2s
+        timeout-duration: 10s
       inventory-service:
-        timeout-duration: 2s
+        timeout-duration: 10s
       order-service:
-        timeout-duration: 3s
+        timeout-duration: 10s
 
   retry:
     instances:
